@@ -1,0 +1,42 @@
+name: Daily forecast
+
+on:
+  schedule:
+    # 7:15 AM America/Chicago (12:15 UTC during CDT). Change if you prefer.
+    - cron: "15 12 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run forecast
+        run: python weather_forecast.py
+
+      - name: Commit CSV
+        run: |
+          git config user.name "automation"
+          git config user.email "noreply@example.com"
+          git add data/*.csv || true
+          git commit -m "forecast $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
+          git push || true
+
+      - name: Upload artifact (download from run page)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ohio-forecast-csv
+          path: data/*.csv
