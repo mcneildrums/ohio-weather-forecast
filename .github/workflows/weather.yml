@@ -2,7 +2,7 @@ name: Daily forecast
 
 on:
   schedule:
-    # 7:15 AM America/Chicago (12:15 UTC during CDT). Change if you prefer.
+    # 7:15 AM America/Chicago (12:15 UTC during CDT)
     - cron: "15 12 * * *"
   workflow_dispatch:
 
@@ -41,16 +41,14 @@ jobs:
           name: ohio-forecast-csv
           path: data/*.csv
 
-      - name: Prepare email body
-        id: body
+      - name: Read email body (markdown table)
+        id: get_body
         run: |
-          echo 'text<<EOF' >> $GITHUB_OUTPUT
-          echo "Ohio weighted 15-day forecast attached."
-          echo "File(s):"
-          ls -1 data/*.csv
-          echo 'EOF' >> $GITHUB_OUTPUT
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          cat email_body.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Email forecast CSV
+      - name: Email forecast (inline table + CSV attachment)
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: ${{ secrets.SMTP_HOST }}
@@ -58,9 +56,9 @@ jobs:
           secure: ${{ secrets.SMTP_PORT == '465' }}   # true for 465, false for 587
           username: ${{ secrets.SMTP_USERNAME }}
           password: ${{ secrets.SMTP_PASSWORD }}
-          from: ${{ secrets.REPORT_FROM_EMAIL }}      # SENDER
-          to: spatel@riverbendeg.com          # RECIPIENT(S), comma-separated allowed
-          subject: "Ohio 15-day weighted forecast"
-          body: ${{ steps.body.outputs.text }}
+          from: ${{ secrets.REPORT_FROM_EMAIL }}
+          to: spatel@riverbendeg.com
+          subject: "Ohio Weighted Weather Forecast"
+          body: ${{ steps.get_body.outputs.body }}
           attachments: |
-            data/*.csv
+            data/weighted_ohio_forecast_*.csv
