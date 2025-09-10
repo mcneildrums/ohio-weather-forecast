@@ -40,3 +40,27 @@ jobs:
         with:
           name: ohio-forecast-csv
           path: data/*.csv
+
+      - name: Prepare email body
+        id: body
+        run: |
+          echo 'text<<EOF' >> $GITHUB_OUTPUT
+          echo "Ohio weighted 15-day forecast attached."
+          echo "File(s):"
+          ls -1 data/*.csv
+          echo 'EOF' >> $GITHUB_OUTPUT
+
+      - name: Email forecast CSV
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          secure: ${{ secrets.SMTP_PORT == '465' }}   # true for 465, false for 587
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          from: ${{ secrets.REPORT_FROM_EMAIL }}      # SENDER
+          to: spatel@riverbendeg.com          # RECIPIENT(S), comma-separated allowed
+          subject: "Ohio 15-day weighted forecast"
+          body: ${{ steps.body.outputs.text }}
+          attachments: |
+            data/*.csv
