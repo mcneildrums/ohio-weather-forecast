@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-# Pulls weighted Ohio 15-day mean temps and writes a CSV with:
-# date, weighted_avg_f, day_over_day_change_f, normal_10yr_f, normal_30yr_f
+# Pulls weighted Ohio 15-day mean temps and writes:
+# - CSV: data/weighted_ohio_forecast_<first_date>.csv
+# - email_body.txt: Markdown table for embedding into email body
 
 import requests
 import pathlib
 import csv
 from collections import defaultdict
 from datetime import datetime
+import pandas as pd  # NEW: for building the email table
 
 DAYS = 15
 
@@ -94,7 +96,7 @@ def main():
         v = sum(city_series[city][i] * meta["weight"] for city, meta in AIRPORTS.items())
         weighted.append(round(v, 1))
 
-    # 3) Day-over-day change (new column right next to weighted values)
+    # 3) Day-over-day change (right next to weighted values)
     dod_change = [""]
     for i in range(1, DAYS):
         dod_change.append(round(weighted[i] - weighted[i - 1], 1))
@@ -142,6 +144,19 @@ def main():
         ])
         for i in range(DAYS):
             w.writerow([dates_ref[i], weighted[i], dod_change[i], normal_10yr[i], normal_30yr[i]])
+
+    # 6) Build a Markdown table for the email body
+    df = pd.read_csv(out_path)
+    try:
+        table = df.to_markdown(index=False)  # requires 'tabulate'
+    except Exception:
+        # Fallback to a simple CSV block if markdown fails
+        table = df.to_csv(index=False)
+
+    with open("email_body.txt", "w", encoding="utf-8") as f:
+        f.write("Ohio Weighted 15-Day Forecast\n\n")
+        f.write(table)
+        f.write("\n\n(Attached CSV has full details.)\n")
 
     print(",".join(str(x) for x in weighted))
     print(f"Saved: {out_path}")
