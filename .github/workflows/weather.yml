@@ -41,12 +41,16 @@ jobs:
           name: ohio-forecast-csv
           path: data/*.csv
 
-      - name: Read HTML body
-        id: get_body
+      - name: Read HTML body (safe delimiter)
+        id: body
+        shell: bash
         run: |
-          echo "html<<EOF" >> $GITHUB_OUTPUT
-          cat email_body.html >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          DELIM="HTML_$(date +%s)_$$"
+          {
+            echo "html<<$DELIM"
+            cat email_body.html
+            echo "$DELIM"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Email forecast (HTML table + CSV attachment)
         uses: dawidd6/action-send-mail@v3
@@ -59,6 +63,6 @@ jobs:
           from: ${{ secrets.REPORT_FROM_EMAIL }}
           to: ${{ secrets.REPORT_TO_EMAIL }}
           subject: "Ohio Weighted Weather Forecast"
-          html_body: ${{ steps.get_body.outputs.html }}
+          html_body: ${{ steps.body.outputs.html }}
           attachments: |
             data/weighted_ohio_forecast_*.csv
