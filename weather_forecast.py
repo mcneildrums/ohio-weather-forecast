@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # Pulls weighted Ohio 15-day mean temps and writes:
 # - CSV: data/weighted_ohio_forecast_<first_date>.csv
-# - email_body.txt: Markdown table for embedding into email body
+# - email_body.html: HTML table for embedding into email body
 
 import requests
 import pathlib
 import csv
 from collections import defaultdict
 from datetime import datetime
-import pandas as pd  # NEW: for building the email table
+import pandas as pd
 
 DAYS = 15
 
@@ -46,10 +46,7 @@ def fetch_mean_temps(lat: float, lon: float, days: int = DAYS):
     return j["daily"]["time"], j["daily"]["temperature_2m_mean"]
 
 def fetch_normals_doy_map(lat: float, lon: float, start_year: int, end_year: int):
-    """
-    Fetch daily mean temps over a year range and collapse to a
-    month-day (MM-DD) -> climatological average (°F) map.
-    """
+    """Return {'MM-DD': climatological mean °F} using Open-Meteo climate API."""
     url = (
         f"{CLIMATE_BASE}"
         f"?latitude={lat}&longitude={lon}"
@@ -64,6 +61,7 @@ def fetch_normals_doy_map(lat: float, lon: float, start_year: int, end_year: int
         vals  = j.get("daily", {}).get("temperature_2m_mean")
         if not times or not vals or len(times) != len(vals):
             return {}
+        from collections import defaultdict
         buckets = defaultdict(list)
         for t, v in zip(times, vals):
             try:
@@ -72,16 +70,12 @@ def fetch_normals_doy_map(lat: float, lon: float, start_year: int, end_year: int
                     buckets[md].append(float(v))
             except Exception:
                 continue
-        out = {}
-        for md, arr in buckets.items():
-            if arr:
-                out[md] = round(sum(arr) / len(arr), 1)
-        return out
+        return {md: round(sum(arr) / len(arr), 1) for md, arr in buckets.items() if arr}
     except Exception:
         return {}
 
 def main():
-    # 1) Forecast for each airport
+    # 1) Forecast per airport
     city_series = {}
     dates_ref = None
     for city, meta in AIRPORTS.items():
@@ -96,12 +90,12 @@ def main():
         v = sum(city_series[city][i] * meta["weight"] for city, meta in AIRPORTS.items())
         weighted.append(round(v, 1))
 
-    # 3) Day-over-day change (right next to weighted values)
+    # 3) Day-over-day change
     dod_change = [""]
     for i in range(1, DAYS):
         dod_change.append(round(weighted[i] - weighted[i - 1], 1))
 
-    # 4) Normals per airport (10y & 30y) and weighted normals
+    # 4) Normals (10y & 30y) and weighted normals
     normals_10_by_city = {}
     normals_30_by_city = {}
     for city, meta in AIRPORTS.items():
@@ -112,7 +106,7 @@ def main():
     normal_30yr = []
     for d in dates_ref:
         md = d[5:]  # 'MM-DD'
-        # Weighted 10y
+        # Weighted 10y normal
         total10, wsum10 = 0.0, 0.0
         for city, meta in AIRPORTS.items():
             val = normals_10_by_city.get(city, {}).get(md)
@@ -121,7 +115,7 @@ def main():
                 wsum10  += meta["weight"]
         normal_10yr.append(round(total10, 1) if wsum10 > 0 else "")
 
-        # Weighted 30y
+        # Weighted 30y normal
         total30, wsum30 = 0.0, 0.0
         for city, meta in AIRPORTS.items():
             val = normals_30_by_city.get(city, {}).get(md)
@@ -145,19 +139,32 @@ def main():
         for i in range(DAYS):
             w.writerow([dates_ref[i], weighted[i], dod_change[i], normal_10yr[i], normal_30yr[i]])
 
-    # 6) Build a Markdown table for the email body
+    # 6) Build an HTML table for the email body
     df = pd.read_csv(out_path)
-    try:
-        table = df.to_markdown(index=False)  # requires 'tabulate'
-    except Exception:
-        # Fallback to a simple CSV block if markdown fails
-        table = df.to_csv(index=False)
+    table_html = df.to_html(index=False, border=0, justify="center")
 
-    with open("email_body.txt", "w", encoding="utf-8") as f:
-        f.write("Ohio Weighted 15-Day Forecast\n\n")
-        f.write(table)
-        f.write("\n\n(Attached CSV has full details.)\n")
+    # Minimal inline styles for email clients
+    style = """
+    <style>
+      body { font-family: Arial, Helvetica, sans-serif; color:#111; }
+      h2 { margin: 0 0 10px 0; font-size: 16px; }
+      table { border-collapse: collapse; width: 100%; max-width: 820px; }
+      th, td { border: 1px solid #ddd; padding: 6px 8px; font-size: 13px; text-align: right; }
+      th { background:#f4f6f8; text-align: center; }
+      td:first-child, th:first-child { text-align: left; }
+      .small { color:#666; font-size: 12px; }
+    </style>
+    """
 
+    heading = f"<h2>Ohio Weighted 15-Day Forecast</h2>"
+    sub = f"<div class='small'>Generated {datetime.now().strftime('%Y-%m-%d %H:%M %Z')}</div>"
+
+    html = f"<!DOCTYPE html><html><head><meta charset='utf-8'>{style}</head><body>{heading}{sub}{table_html}<p class='small'>(CSV attached.)</p></body></html>"
+
+    with open("email_body.html", "w", encoding="utf-8") as f:
+        f.write(html)
+
+    # Logs
     print(",".join(str(x) for x in weighted))
     print(f"Saved: {out_path}")
 
