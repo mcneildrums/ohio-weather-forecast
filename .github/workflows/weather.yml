@@ -41,14 +41,14 @@ jobs:
           name: ohio-forecast-csv
           path: data/*.csv
 
-      - name: Read email body (markdown table)
+      - name: Read HTML body
         id: get_body
         run: |
-          echo "body<<EOF" >> $GITHUB_OUTPUT
-          cat email_body.txt >> $GITHUB_OUTPUT
+          echo "html<<EOF" >> $GITHUB_OUTPUT
+          cat email_body.html >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Email forecast (inline table + CSV attachment)
+      - name: Email forecast (HTML table + CSV attachment)
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: ${{ secrets.SMTP_HOST }}
@@ -59,6 +59,6 @@ jobs:
           from: ${{ secrets.REPORT_FROM_EMAIL }}
           to: ${{ secrets.REPORT_TO_EMAIL }}
           subject: "Ohio Weighted Weather Forecast"
-          body: ${{ steps.get_body.outputs.body }}
+          html_body: ${{ steps.get_body.outputs.html }}
           attachments: |
             data/weighted_ohio_forecast_*.csv
