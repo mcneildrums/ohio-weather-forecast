@@ -57,7 +57,7 @@ jobs:
           username: ${{ secrets.SMTP_USERNAME }}
           password: ${{ secrets.SMTP_PASSWORD }}
           from: ${{ secrets.REPORT_FROM_EMAIL }}
-          to: spatel@riverbendeg.com
+          to: ${{ secrets.REPORT_TO_EMAIL }}
           subject: "Ohio Weighted Weather Forecast"
           body: ${{ steps.get_body.outputs.body }}
           attachments: |
