@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # Pulls weighted Ohio 15-day mean temps and writes:
 # - CSV: data/weighted_ohio_forecast_<first_date>.csv
-# - email_body.html: HTML table for embedding into email body
+# - email_body.html: HTML table (with conditional formatting) for embedding into email body
 
 import requests
 import pathlib
 import csv
 from collections import defaultdict
 from datetime import datetime
+import html
 import pandas as pd
 
 DAYS = 15
@@ -26,6 +27,9 @@ CLIMATE_BASE  = "https://climate-api.open-meteo.com/v1/climate"
 # Choose 30-year and 10-year windows (inclusive)
 NORMALS_30Y = (1991, 2020)   # WMO standard normals
 NORMALS_10Y = (2015, 2024)   # last 10 years
+
+# Threshold for highlighting day-over-day change (°F)
+DOD_HIGHLIGHT = 2.0
 
 def _http_get_json(url: str) -> dict:
     r = requests.get(url, timeout=40)
@@ -61,7 +65,6 @@ def fetch_normals_doy_map(lat: float, lon: float, start_year: int, end_year: int
         vals  = j.get("daily", {}).get("temperature_2m_mean")
         if not times or not vals or len(times) != len(vals):
             return {}
-        from collections import defaultdict
         buckets = defaultdict(list)
         for t, v in zip(times, vals):
             try:
@@ -73,6 +76,89 @@ def fetch_normals_doy_map(lat: float, lon: float, start_year: int, end_year: int
         return {md: round(sum(arr) / len(arr), 1) for md, arr in buckets.items() if arr}
     except Exception:
         return {}
+
+def build_html_table(df: pd.DataFrame) -> str:
+    """Return an HTML table with conditional formatting on the DoD change column."""
+    # Inline CSS tuned for email clients
+    style = """
+    <style>
+      body { font-family: Arial, Helvetica, sans-serif; color:#111; }
+      h2 { margin: 0 0 8px 0; font-size: 16px; }
+      .small { color:#666; font-size: 12px; margin-bottom:10px; }
+      table { border-collapse: collapse; width: 100%; max-width: 860px; }
+      th, td { border: 1px solid #ddd; padding: 6px 8px; font-size: 13px; text-align: right; }
+      th { background:#f4f6f8; text-align: center; }
+      td:first-child, th:first-child { text-align: left; }
+      /* Row highlights */
+      .warm { background: #ffecec; font-weight: 600; }  /* red-ish for warming */
+      .cool { background: #eaf4ff; font-weight: 600; }  /* blue-ish for cooling */
+      /* Make DoD column stand out slightly even if not highlighted */
+      .dod { font-variant-numeric: tabular-nums; }
+      .pos { color:#b30000; }  /* red text for positive change */
+      .neg { color:#0054b3; }  /* blue text for negative change */
+      .zero { color:#555; }
+    </style>
+    """
+
+    # Build table manually so we can control per-row classes
+    cols = ["date", "weighted_avg_f", "day_over_day_change_f", "normal_10yr_f", "normal_30yr_f"]
+    headers = ["Date", "Weighted Avg (°F)", "DoD Change (°F)", "Normal 10y (°F)", "Normal 30y (°F)"]
+
+    def fmt(val):
+        if val == "" or pd.isna(val):
+            return ""
+        if isinstance(val, float):
+            return f"{val:.1f}"
+        return html.escape(str(val))
+
+    lines = []
+    lines.append("<table>")
+    # header
+    lines.append("<thead><tr>" + "".join(f"<th>{h}</th>" for h in headers) + "</tr></thead>")
+    lines.append("<tbody>")
+
+    for _, r in df.iterrows():
+        dod = r.get("day_over_day_change_f", "")
+        cls = ""
+        # determine highlight class and signed class for the DoD cell
+        dod_txt = ""
+        dod_cell_cls = "dod"
+        if dod == "" or pd.isna(dod):
+            dod_txt = ""
+            sign_cls = "zero"
+        else:
+            try:
+                val = float(dod)
+                # Bold+color rows if abs change >= threshold
+                if val >= DOD_HIGHLIGHT:
+                    cls = "warm"
+                elif val <= -DOD_HIGHLIGHT:
+                    cls = "cool"
+                # add +/- sign and color on the DoD cell
+                sign = "+" if val > 0 else ("" if val == 0 else "–")
+                pretty = f"{sign}{abs(val):.1f}"
+                sign_cls = "pos" if val > 0 else ("neg" if val < 0 else "zero")
+                dod_txt = pretty
+            except Exception:
+                sign_cls = "zero"
+                dod_txt = html.escape(str(dod))
+
+        tds = []
+        tds.append(f"<td>{fmt(r.get('date'))}</td>")
+        tds.append(f"<td>{fmt(r.get('weighted_avg_f'))}</td>")
+        tds.append(f"<td class='{dod_cell_cls} {sign_cls}'>{dod_txt}</td>")
+        tds.append(f"<td>{fmt(r.get('normal_10yr_f'))}</td>")
+        tds.append(f"<td>{fmt(r.get('normal_30yr_f'))}</td>")
+
+        tr_open = f"<tr class='{cls}'>" if cls else "<tr>"
+        lines.append(tr_open + "".join(tds) + "</tr>")
+
+    lines.append("</tbody></table>")
+
+    heading = "<h2>Ohio Weighted 15-Day Forecast</h2>"
+    sub = f"<div class='small'>Generated {datetime.now().strftime('%Y-%m-%d %H:%M %Z')}</div>"
+
+    return f"<!DOCTYPE html><html><head><meta charset='utf-8'>{style}</head><body>{heading}{sub}{''.join(lines)}<p class='small'>(CSV attached.)</p></body></html>"
 
 def main():
     # 1) Forecast per airport
@@ -106,7 +192,7 @@ def main():
     normal_30yr = []
     for d in dates_ref:
         md = d[5:]  # 'MM-DD'
-        # Weighted 10y normal
+        # Weighted 10y
         total10, wsum10 = 0.0, 0.0
         for city, meta in AIRPORTS.items():
             val = normals_10_by_city.get(city, {}).get(md)
@@ -115,7 +201,7 @@ def main():
                 wsum10  += meta["weight"]
         normal_10yr.append(round(total10, 1) if wsum10 > 0 else "")
 
-        # Weighted 30y normal
+        # Weighted 30y
         total30, wsum30 = 0.0, 0.0
         for city, meta in AIRPORTS.items():
             val = normals_30_by_city.get(city, {}).get(md)
@@ -139,30 +225,11 @@ def main():
         for i in range(DAYS):
             w.writerow([dates_ref[i], weighted[i], dod_change[i], normal_10yr[i], normal_30yr[i]])
 
-    # 6) Build an HTML table for the email body
+    # 6) Build HTML (with conditional formatting) for the email body
     df = pd.read_csv(out_path)
-    table_html = df.to_html(index=False, border=0, justify="center")
-
-    # Minimal inline styles for email clients
-    style = """
-    <style>
-      body { font-family: Arial, Helvetica, sans-serif; color:#111; }
-      h2 { margin: 0 0 10px 0; font-size: 16px; }
-      table { border-collapse: collapse; width: 100%; max-width: 820px; }
-      th, td { border: 1px solid #ddd; padding: 6px 8px; font-size: 13px; text-align: right; }
-      th { background:#f4f6f8; text-align: center; }
-      td:first-child, th:first-child { text-align: left; }
-      .small { color:#666; font-size: 12px; }
-    </style>
-    """
-
-    heading = f"<h2>Ohio Weighted 15-Day Forecast</h2>"
-    sub = f"<div class='small'>Generated {datetime.now().strftime('%Y-%m-%d %H:%M %Z')}</div>"
-
-    html = f"<!DOCTYPE html><html><head><meta charset='utf-8'>{style}</head><body>{heading}{sub}{table_html}<p class='small'>(CSV attached.)</p></body></html>"
-
+    html_doc = build_html_table(df)
     with open("email_body.html", "w", encoding="utf-8") as f:
-        f.write(html)
+        f.write(html_doc)
 
     # Logs
     print(",".join(str(x) for x in weighted))
