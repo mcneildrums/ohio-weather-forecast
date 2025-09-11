@@ -41,16 +41,15 @@ jobs:
           name: ohio-forecast-csv
           path: data/*.csv
 
-      - name: Read HTML body (safe delimiter)
+      # 👇 Safe, bulletproof way to read HTML into an output
+      - name: Read HTML body
         id: body
-        shell: bash
-        run: |
-          DELIM="HTML_$(date +%s)_$$"
-          {
-            echo "html<<$DELIM"
-            cat email_body.html
-            echo "$DELIM"
-          } >> "$GITHUB_OUTPUT"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const html = fs.readFileSync('email_body.html', 'utf8');
+            core.setOutput('html', html);
 
       - name: Email forecast (HTML table + CSV attachment)
         uses: dawidd6/action-send-mail@v3
